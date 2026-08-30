@@ -1,2 +1,0 @@
-# subdo
-Subdomain by Yasam
