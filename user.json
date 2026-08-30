@@ -1,2 +1,9 @@
-# subdo
-Subdomain by Yasam
+{
+  "users": [
+    {
+      "username": "yasam",
+      "password": "123",
+      "active": true
+    }
+  ]
+}
