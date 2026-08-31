@@ -1,0 +1,8 @@
+{
+  "name": "yasam-dns-panel",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {"node": ">=18"},
+  "scripts": {"dev": "vercel dev", "start": "vercel dev", "hash": "node scripts/hash-password.js"},
+  "dependencies": {}
+}
