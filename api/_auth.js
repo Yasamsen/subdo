@@ -1,61 +1,115 @@
 const crypto = require("crypto");
 
-function cookieName() { return "yasam_session"; }
+const COOKIE_NAME = "yasam_session";
 
 function sign(value) {
-  return crypto.createHmac("sha256", process.env.SESSION_SECRET || "").update(value).digest("base64url");
+  const secret = process.env.SESSION_SECRET;
+
+  if (!secret) {
+    throw new Error("SESSION_SECRET is not configured");
+  }
+
+  return crypto
+    .createHmac("sha256", secret)
+    .update(value)
+    .digest("base64url");
 }
 
 function makeSession() {
-  const payload = Buffer.from(JSON.stringify({
-    sub: "admin",
-    iat: Date.now(),
-    exp: Date.now() + 1000 * 60 * 60 * 24
-  })).toString("base64url");
-  return `${payload}.${sign(payload)}`;
+  const now = Date.now();
+
+  const payload = Buffer.from(
+    JSON.stringify({
+      sub: "admin",
+      iat: now,
+      exp: now + 24 * 60 * 60 * 1000
+    })
+  ).toString("base64url");
+
+  const signature = sign(payload);
+
+  return `${payload}.${signature}`;
+}
+
+function getCookie(req) {
+  const header = req.headers.cookie || "";
+
+  const cookies = header.split(";");
+
+  for (const item of cookies) {
+    const [name, ...parts] = item.trim().split("=");
+
+    if (name === COOKIE_NAME) {
+      return decodeURIComponent(parts.join("="));
+    }
+  }
+
+  return null;
 }
 
 function verifySession(req) {
-  const header = req.headers.cookie || "";
-  const found = header.split(";").map(v => v.trim()).find(v => v.startsWith(cookieName()+"="));
-  if (!found) return false;
-  const token = decodeURIComponent(found.slice(cookieName().length + 1));
-  const [payload, sig] = token.split(".");
-  if (!payload || !sig) return false;
-  const expected = sign(payload);
-  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false;
   try {
-    const data = JSON.parse(Buffer.from(payload, "base64url").toString());
-    return data.sub === "admin" && data.exp > Date.now();
-  } catch { return false; }
+    if (!process.env.SESSION_SECRET) {
+      return false;
+    }
+
+    const token = getCookie(req);
+
+    if (!token) {
+      return false;
+    }
+
+    const parts = token.split(".");
+
+    if (parts.length !== 2) {
+      return false;
+    }
+
+    const [payload, signature] = parts;
+
+    if (!payload || !signature) {
+      return false;
+    }
+
+    const expected = sign(payload);
+
+    const receivedBuffer = Buffer.from(signature);
+    const expectedBuffer = Buffer.from(expected);
+
+    // timingSafeEqual membutuhkan panjang buffer yang sama
+    if (receivedBuffer.length !== expectedBuffer.length) {
+      return false;
+    }
+
+    if (!crypto.timingSafeEqual(receivedBuffer, expectedBuffer)) {
+      return false;
+    }
+
+    const data = JSON.parse(
+      Buffer.from(payload, "base64url").toString("utf8")
+    );
+
+    if (data.sub !== "admin") {
+      return false;
+    }
+
+    if (!data.exp || data.exp <= Date.now()) {
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    return false;
+  }
 }
 
 function setSession(res) {
-  res.setHeader("Set-Cookie",
-    `${cookieName()}=${encodeURIComponent(makeSession())}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=86400`);
+  const token = makeSession();
+
+  res.setHeader(
+    "Set-Cookie",
+    `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`
+  );
 }
 
-function clearSession(res) {
-  res.setHeader("Set-Cookie",
-    `${cookieName()}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`);
-}
-
-function requireAuth(req, res) {
-  if (!process.env.SESSION_SECRET || !verifySession(req)) {
-    res.status(401).json({ success:false, error:"Unauthorized" });
-    return false;
-  }
-  return true;
-}
-
-function verifyPassword(password, encoded) {
-  try {
-    const [algo,Ns,rs,ps,salt64,key64] = String(encoded).split("$");
-    if (algo !== "scrypt") return false;
-    const N=Number(Ns), r=Number(rs), p=Number(ps);
-    const salt=Buffer.from(salt64,"base64url"), stored=Buffer.from(key64,"base64url");
-    const derived=crypto.scryptSync(password, salt, stored.length, {N,r,p,maxmem:64*1024*1024});
-    return crypto.timingSafeEqual(derived, stored);
-  } catch { return false; }
-}
-module.exports = { setSession, clearSession, requireAuth, verifyPassword, verifySession };
+function clearS
